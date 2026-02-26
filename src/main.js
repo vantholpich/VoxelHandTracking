@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 // --- Configuration ---
 const VOXEL_SIZE = 1;
 const GRID_SIZE = 20;
-const PINCH_THRESHOLD = 0.04; // Slightly relaxed for reliability
+const PINCH_THRESHOLD = 0.045; // Slightly relaxed for reliability
 const BUILD_COOLDOWN = 300; // Increased cooldown to prevent accidental multiple builds
 
 const HAND_CONNECTIONS = [
@@ -360,8 +360,8 @@ function processPinch(results) {
           const deltaY = thumbTip.y - lastLeftHandPos.y;
           const sensitivity = 15.0;
 
-          if (pointing) controls.rotateLeft(-deltaX * sensitivity);
-          if (clenched) controls.rotateUp(deltaY * sensitivity);
+          if (clenched) controls.rotateLeft(-deltaX * sensitivity);
+          if (pointing) controls.rotateUp(deltaY * sensitivity);
           controls.update();
 
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
@@ -482,7 +482,7 @@ function processPinch(results) {
     statusElement.innerText = "Targeting...";
     statusElement.style.background = "rgba(255, 255, 255, 0.1)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
-    statusElement.innerText = "Left: Point to Spin | Fist to Tilt";
+    statusElement.innerText = "Left: Fist to Spin | Point to Tilt";
   } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over voxel to target";
   } else if (isAnyRotatingHandDetected) {
