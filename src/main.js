@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 // --- Configuration ---
 const VOXEL_SIZE = 1;
 const GRID_SIZE = 20;
-const PINCH_THRESHOLD = 0.05; // Slightly relaxed threshold
+const PINCH_THRESHOLD = 0.03; // Slightly relaxed threshold
 const BUILD_COOLDOWN = 300; // Increased cooldown to prevent accidental multiple builds
 
 const HAND_CONNECTIONS = [
@@ -24,6 +24,7 @@ let webcam;
 let lastVideoTime = -1;
 let voxels = [];
 let previewVoxel;
+let selectionHighlight;
 let isPinching = false;
 let lastBuildTime = 0;
 let lastPlacedPos = new THREE.Vector3();
@@ -92,6 +93,20 @@ function setupThree() {
   previewVoxel = new THREE.Mesh(previewGeo, previewMat);
   previewVoxel.visible = false;
   scene.add(previewVoxel);
+
+  // Selection Highlight
+  const highlightGeo = new THREE.PlaneGeometry(VOXEL_SIZE * 1.05, VOXEL_SIZE * 1.05);
+  const highlightMat = new THREE.MeshStandardMaterial({
+    color: 0x00ffff,
+    transparent: true,
+    opacity: 0.5,
+    side: THREE.DoubleSide,
+    emissive: 0x00ffff,
+    emissiveIntensity: 0.5
+  });
+  selectionHighlight = new THREE.Mesh(highlightGeo, highlightMat);
+  selectionHighlight.visible = false;
+  scene.add(selectionHighlight);
 
   // Invisible 3D markers for depth/building calculations
   for (let i = 0; i < 21; i++) {
@@ -206,6 +221,7 @@ function updateHandMarkers(results) {
 function processPinch(results) {
   if (!results.landmarks || results.landmarks.length === 0) {
     previewVoxel.visible = false;
+    selectionHighlight.visible = false;
     return;
   }
 
@@ -258,7 +274,16 @@ function processPinch(results) {
       }
 
       targetVoxelPos = closestVoxel.position.clone().add(normal.multiplyScalar(VOXEL_SIZE));
+
+      // Update Selection Highlight
+      selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
+      selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+      selectionHighlight.visible = true;
+    } else {
+      selectionHighlight.visible = false;
     }
+  } else {
+    selectionHighlight.visible = false;
   }
 
   if (distance < PINCH_THRESHOLD) {
@@ -321,6 +346,7 @@ function processPinch(results) {
     statusElement.innerText = "Building Line...";
     statusElement.style.background = "rgba(0, 255, 0, 0.4)";
     previewVoxel.visible = false;
+    selectionHighlight.visible = false;
   } else {
     // --- NOT PINCHING ---
     if (distance > PINCH_THRESHOLD + 0.01) {
