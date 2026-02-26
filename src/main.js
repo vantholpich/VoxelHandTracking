@@ -36,6 +36,8 @@ let handLines = []; // lines for connections
 let handCursors = []; // 3D cursors for each hand
 let isLeftGestureActive = false;
 let lastLeftHandPos = new THREE.Vector2();
+let currentBuildNormal = null;
+let initialBuildPos = new THREE.Vector3();
 
 // --- Elements ---
 const videoElement = document.getElementById('webcam');
@@ -306,6 +308,7 @@ function processPinch(results) {
     selectionHighlight.visible = false;
     handCursors.forEach(c => c.visible = false);
     isLeftGestureActive = false;
+    currentBuildNormal = null; // Reset build normal if hands are gone
     return;
   }
 
@@ -402,6 +405,8 @@ function processPinch(results) {
         const now = performance.now();
         if (!isPinching) {
           let firstPos = null;
+          let normal = null;
+
           if (voxels.length === 0) {
             // First voxel in empty scene
             firstPos = new THREE.Vector3(
@@ -409,57 +414,54 @@ function processPinch(results) {
               Math.round(currentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
               Math.round(currentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
             );
-          } else if (targetVoxelPos) {
+            // Default normal for empty scene (Up)
+            normal = new THREE.Vector3(0, 1, 0);
+          } else {
             // Building on a selected face
-            firstPos = targetVoxelPos;
+            const rayDir = m8.clone().sub(camera.position).normalize();
+            raycaster.set(camera.position, rayDir);
+            const intersects = raycaster.intersectObjects(voxels);
+
+            if (intersects.length > 0) {
+              const hit = intersects[0];
+              normal = hit.face.normal.clone().applyQuaternion(hit.object.quaternion);
+              firstPos = hit.object.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
+            }
           }
 
           if (firstPos) {
             isPinching = true;
+            currentBuildNormal = normal;
+            initialBuildPos.copy(firstPos);
             addVoxel(firstPos);
             lastPlacedPos.copy(firstPos);
             lastPinchWorldPos.copy(currentPinchWorldPos);
             lastBuildTime = now;
           }
-        } else if (now - lastBuildTime > BUILD_COOLDOWN) {
-          // If already pinching, prioritize painting on surface
-          if (targetVoxelPos) {
-            if (targetVoxelPos.distanceTo(lastPlacedPos) > 0.1) {
-              addVoxel(targetVoxelPos);
-              lastPlacedPos.copy(targetVoxelPos);
+        } else if (now - lastBuildTime > BUILD_COOLDOWN && currentBuildNormal) {
+          // --- STRAIGHT LINE EXTRUSION LOGIC ---
+          // Project current hand movement onto the locked axis (currentBuildNormal)
+          const handDelta = currentPinchWorldPos.clone().sub(lastPinchWorldPos);
+          const projectedDist = handDelta.dot(currentBuildNormal);
+
+          if (Math.abs(projectedDist) >= VOXEL_SIZE * 0.7) {
+            const steps = Math.sign(projectedDist);
+            const nextVoxelPos = lastPlacedPos.clone().add(currentBuildNormal.clone().multiplyScalar(steps * VOXEL_SIZE));
+
+            if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
+              addVoxel(nextVoxelPos);
+              lastPlacedPos.copy(nextVoxelPos);
               lastPinchWorldPos.copy(currentPinchWorldPos);
               lastBuildTime = now;
-            }
-          } else {
-            // If dragging into empty air, continue the line (extrusion/drawing)
-            const delta = currentPinchWorldPos.clone().sub(lastPinchWorldPos);
-            const moveDist = delta.length();
-            if (moveDist >= VOXEL_SIZE * 0.7) {
-              const absX = Math.abs(delta.x);
-              const absY = Math.abs(delta.y);
-              const absZ = Math.abs(delta.z);
-              const nextVoxelPos = lastPlacedPos.clone();
-
-              if (absX >= absY && absX >= absZ) {
-                nextVoxelPos.x += (delta.x > 0 ? 1 : -1) * VOXEL_SIZE;
-              } else if (absY >= absX && absY >= absZ) {
-                nextVoxelPos.y += (delta.y > 0 ? 1 : -1) * VOXEL_SIZE;
-              } else {
-                nextVoxelPos.z += (delta.z > 0 ? 1 : -1) * VOXEL_SIZE;
-              }
-
-              if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
-                addVoxel(nextVoxelPos);
-                lastPlacedPos.copy(nextVoxelPos);
-                lastPinchWorldPos.copy(currentPinchWorldPos);
-                lastBuildTime = now;
-              }
             }
           }
         }
         previewVoxel.visible = false;
       } else {
-        if (distance > PINCH_THRESHOLD + 0.01) isPinching = false;
+        if (distance > PINCH_THRESHOLD + 0.01) {
+          isPinching = false;
+          currentBuildNormal = null;
+        }
         if (voxels.length === 0) {
           previewVoxel.position.set(
             Math.round(currentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
