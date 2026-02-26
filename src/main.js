@@ -176,19 +176,40 @@ function animate() {
   if (videoElement.readyState >= 2) if (videoElement.currentTime !== lastVideoTime) {
     lastVideoTime = videoElement.currentTime;
     results = handLandmarker.detectForVideo(videoElement, performance.now());
-    updateHandMarkers(results);
+
+    // Calculate mapping for object-fit: cover (centered scaling)
+    const videoAspect = videoElement.videoWidth / videoElement.videoHeight;
+    const windowAspect = window.innerWidth / window.innerHeight;
+    let scaleX = 1, scaleY = 1;
+
+    if (videoAspect > windowAspect) {
+      // Video is wider than window (cropped horizontally)
+      scaleX = videoAspect / windowAspect;
+    } else {
+      // Video is taller than window (cropped vertically)
+      scaleY = windowAspect / videoAspect;
+    }
+
+    const mapping = { scaleX, scaleY };
+    updateHandMarkers(results, mapping);
     processPinch(results);
   }
 
   renderer.render(scene, camera);
 }
 
-function updateHandMarkers(results) {
+function updateHandMarkers(results, mapping) {
   // Clear 2D Canvas
   ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
 
   if (results.landmarks && results.landmarks.length > 0) {
     results.landmarks.forEach((landmarks, handIdx) => {
+      // Corrected landmarks for screen display (centered scaling)
+      const correctedLandmarks = landmarks.map(l => ({
+        x: (l.x - 0.5) * mapping.scaleX + 0.5,
+        y: (l.y - 0.5) * mapping.scaleY + 0.5,
+        z: l.z
+      }));
       const handedness = results.handedness[handIdx][0];
       const isLeft = handedness ? (handedness.categoryName === "Left" || handedness.label === "Left") : false;
       const color = isLeft ? 'rgba(255, 0, 255, 0.6)' : 'rgba(0, 255, 255, 0.6)';
@@ -198,8 +219,8 @@ function updateHandMarkers(results) {
       ctx2d.strokeStyle = color;
       ctx2d.lineWidth = 2;
       HAND_CONNECTIONS.forEach(([startIdx, endIdx]) => {
-        const start = landmarks[startIdx];
-        const end = landmarks[endIdx];
+        const start = correctedLandmarks[startIdx];
+        const end = correctedLandmarks[endIdx];
 
         ctx2d.beginPath();
         ctx2d.moveTo(start.x * canvas2d.width, start.y * canvas2d.height);
@@ -209,18 +230,18 @@ function updateHandMarkers(results) {
 
       // 2. Draw 2D Hand Landmarks (points)
       ctx2d.fillStyle = fillColor;
-      landmarks.forEach((landmark) => {
+      correctedLandmarks.forEach((landmark) => {
         ctx2d.beginPath();
         ctx2d.arc(landmark.x * canvas2d.width, landmark.y * canvas2d.height, 4, 0, Math.PI * 2);
         ctx2d.fill();
       });
 
       // 3. Update Invisible 3D markers for depth/building logic
-      landmarks.forEach((landmark, i) => {
+      correctedLandmarks.forEach((landmark, i) => {
         const markerIdx = handIdx * 21 + i;
         const marker = handMarkers[markerIdx];
 
-        // Mirror X for AR alignment
+        // Mirror X for AR alignment (since canvas is mirrored)
         const vector = new THREE.Vector3(
           -((landmark.x * 2) - 1),
           - (landmark.y * 2) + 1,
