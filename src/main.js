@@ -32,7 +32,7 @@ let lastPinchWorldPos = new THREE.Vector3();
 let results = undefined;
 let handMarkers = []; // 3D spheres for landmarks
 let handLines = []; // lines for connections
-let isLeftFistActive = false;
+let isLeftGestureActive = false;
 let lastLeftHandPos = new THREE.Vector2();
 
 // --- Elements ---
@@ -231,22 +231,47 @@ function isFist(landmarks) {
   const fingerBases = [5, 9, 13, 17];
   const wrist = landmarks[0];
 
-  let curledFingers = 0;
+  let curledCount = 0;
   for (let i = 0; i < 4; i++) {
     const tip = landmarks[fingerTips[i]];
     const base = landmarks[fingerBases[i]];
-    const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2) + Math.pow(tip.z - wrist.z, 2));
-    const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2) + Math.pow(base.z - wrist.z, 2));
-    if (dTip < dBase) curledFingers++;
+    const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+    const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
+    if (dTip < dBase) curledCount++;
   }
-  return curledFingers >= 3;
+  return curledCount >= 4;
+}
+
+function isPointing(landmarks) {
+  const fingerTips = [12, 16, 20]; // Middle, Ring, Pinky
+  const fingerBases = [9, 13, 17];
+  const wrist = landmarks[0];
+
+  // Index (8) should be extended
+  const indexTip = landmarks[8];
+  const indexBase = landmarks[5];
+  const dIndexTip = Math.sqrt(Math.pow(indexTip.x - wrist.x, 2) + Math.pow(indexTip.y - wrist.y, 2));
+  const dIndexBase = Math.sqrt(Math.pow(indexBase.x - wrist.x, 2) + Math.pow(indexBase.y - wrist.y, 2));
+
+  if (dIndexTip <= dIndexBase * 1.2) return false;
+
+  // Others should be curled
+  let curledCount = 0;
+  for (let i = 0; i < 3; i++) {
+    const tip = landmarks[fingerTips[i]];
+    const base = landmarks[fingerBases[i]];
+    const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+    const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
+    if (dTip < dBase) curledCount++;
+  }
+  return curledCount >= 3;
 }
 
 function processPinch(results) {
   if (!results.landmarks || results.landmarks.length === 0) {
     previewVoxel.visible = false;
     selectionHighlight.visible = false;
-    isLeftFistActive = false;
+    isLeftGestureActive = false;
     return;
   }
 
@@ -273,29 +298,34 @@ function processPinch(results) {
     const currentPinchWorldPos = new THREE.Vector3().addVectors(m4, m8).multiplyScalar(0.5);
 
     if (isLeft) {
-      // --- LEFT HAND LOGIC: ROTATION (FIST) ---
       isRotatingHandDetected = true;
       const clenched = isFist(landmarks);
+      const pointing = isPointing(landmarks);
 
-      if (clenched) {
-        if (!isLeftFistActive) {
-          isLeftFistActive = true;
+      if (clenched || pointing) {
+        if (!isLeftGestureActive) {
+          isLeftGestureActive = true;
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         } else {
           // Calculate movement delta in normalized screen space
           const deltaX = thumbTip.x - lastLeftHandPos.x;
           const deltaY = thumbTip.y - lastLeftHandPos.y;
-
-          // Apply rotation to OrbitControls (Inverted X as per previous request)
           const sensitivity = 15.0;
-          controls.rotateLeft(-deltaX * sensitivity);
-          controls.rotateUp(deltaY * sensitivity);
+
+          if (pointing) {
+            // Pointing rotates Left/Right
+            controls.rotateLeft(-deltaX * sensitivity);
+          }
+          if (clenched) {
+            // Fist rotates Up/Down
+            controls.rotateUp(deltaY * sensitivity);
+          }
           controls.update();
 
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         }
       } else {
-        isLeftFistActive = false;
+        isLeftGestureActive = false;
       }
     } else {
       // --- RIGHT HAND LOGIC: BUILDING ---
@@ -408,18 +438,18 @@ function processPinch(results) {
   if (isPinching) {
     statusElement.innerText = "Building Line...";
     statusElement.style.background = "rgba(0, 255, 0, 0.4)";
-  } else if (isLeftFistActive) {
+  } else if (isLeftGestureActive) {
     statusElement.innerText = "Rotating View...";
     statusElement.style.background = "rgba(255, 0, 255, 0.4)";
   } else if (previewVoxel.visible) {
     statusElement.innerText = "Targeting...";
     statusElement.style.background = "rgba(255, 255, 255, 0.1)";
   } else if (isRotatingHandDetected && isBuildingHandDetected) {
-    statusElement.innerText = "Left: Clench Fist to Rotate | Right: Build";
+    statusElement.innerText = "Left: Point to Spin | Fist to Tilt";
   } else if (isBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over voxel to target";
   } else if (isRotatingHandDetected) {
-    statusElement.innerText = "Clench left fist and move to rotate";
+    statusElement.innerText = "Point/Fist and move left hand to rotate";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
