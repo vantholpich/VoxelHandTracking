@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 // --- Configuration ---
 const VOXEL_SIZE = 1;
 const GRID_SIZE = 20;
-const PINCH_THRESHOLD = 0.03; // Slightly relaxed threshold
+const PINCH_THRESHOLD = 0.05; // Slightly relaxed threshold
 const BUILD_COOLDOWN = 300; // Increased cooldown to prevent accidental multiple builds
 
 const HAND_CONNECTIONS = [
@@ -32,6 +32,7 @@ let lastPinchWorldPos = new THREE.Vector3();
 let results = undefined;
 let handMarkers = []; // 3D spheres for landmarks
 let handLines = []; // lines for connections
+let handCursors = []; // 3D cursors for each hand
 let isLeftGestureActive = false;
 let lastLeftHandPos = new THREE.Vector2();
 
@@ -115,6 +116,16 @@ function setupThree() {
     const marker = new THREE.Object3D();
     scene.add(marker);
     handMarkers.push(marker);
+  }
+
+  // Cursors (2 hands)
+  for (let i = 0; i < 2; i++) {
+    const cursorGeo = new THREE.SphereGeometry(0.1, 16, 16);
+    const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const cursor = new THREE.Mesh(cursorGeo, cursorMat);
+    cursor.visible = false;
+    scene.add(cursor);
+    handCursors.push(cursor);
   }
 
   clock = new THREE.Clock();
@@ -271,6 +282,7 @@ function processPinch(results) {
   if (!results.landmarks || results.landmarks.length === 0) {
     previewVoxel.visible = false;
     selectionHighlight.visible = false;
+    handCursors.forEach(c => c.visible = false);
     isLeftGestureActive = false;
     return;
   }
@@ -296,6 +308,14 @@ function processPinch(results) {
     const m8 = handMarkers[handIdx * 21 + 8].position;
     if (!m4 || !m8) return;
     const currentPinchWorldPos = new THREE.Vector3().addVectors(m4, m8).multiplyScalar(0.5);
+
+    // Update 3D Cursor to follow index tip (landmark 8)
+    const cursor = handCursors[handIdx];
+    if (cursor) {
+      cursor.position.copy(m8); // Landmark 8 is the index tip
+      cursor.material.color.set(isLeft ? 0xff00ff : 0x00ffff);
+      cursor.visible = true;
+    }
 
     if (isLeft) {
       isRotatingHandDetected = true;
@@ -459,8 +479,13 @@ function processPinch(results) {
     previewVoxel.visible = false;
     selectionHighlight.visible = false;
   }
+  // Hide inactive cursors
+  handCursors.forEach((cursor, idx) => {
+    if (!results.landmarks[idx]) cursor.visible = false;
+  });
+
   if (!isRotatingHandDetected) {
-    isLeftFistActive = false;
+    isLeftGestureActive = false;
   }
 }
 
