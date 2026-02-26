@@ -1,0 +1,19 @@
+{
+  "name": "voxel-hand-tracking",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.32",
+    "@types/three": "^0.183.1",
+    "three": "^0.183.1"
+  }
+}
