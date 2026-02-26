@@ -100,13 +100,13 @@ function setupThree() {
   previewVoxel.visible = false;
   scene.add(previewVoxel);
 
-  // Selection Highlight
-  const highlightGeo = new THREE.PlaneGeometry(VOXEL_SIZE * 1.05, VOXEL_SIZE * 1.05);
+  // Selection Highlight (Box surround)
+  const highlightGeo = new THREE.BoxGeometry(VOXEL_SIZE * 1.05, VOXEL_SIZE * 1.05, VOXEL_SIZE * 1.05);
   const highlightMat = new THREE.MeshStandardMaterial({
     color: 0x00ffff,
     transparent: true,
-    opacity: 0.5,
-    side: THREE.DoubleSide,
+    opacity: 0.3,
+    wireframe: true,
     emissive: 0x00ffff,
     emissiveIntensity: 0.5
   });
@@ -382,9 +382,7 @@ function processPinch(results) {
 
         if (intersects.length > 0) {
           const hit = intersects[0];
-          const closestVoxel = hit.object;
-          frameTargetNormal = hit.face.normal.clone().applyQuaternion(closestVoxel.quaternion);
-          frameTargetVoxelPos = closestVoxel.position.clone().add(frameTargetNormal.clone().multiplyScalar(VOXEL_SIZE));
+          frameTargetVoxelPos = hit.object.position.clone();
         }
       }
     }
@@ -394,8 +392,7 @@ function processPinch(results) {
   if (isAnyBuildingHandDetected) {
     // 1. Update Selection Highlight
     if (frameTargetVoxelPos && !isPinching) {
-      selectionHighlight.position.copy(frameTargetVoxelPos).sub(frameTargetNormal.clone().multiplyScalar(VOXEL_SIZE * 0.49));
-      selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), frameTargetNormal);
+      selectionHighlight.position.copy(frameTargetVoxelPos);
       selectionHighlight.visible = true;
     } else {
       selectionHighlight.visible = false;
@@ -414,34 +411,59 @@ function processPinch(results) {
             Math.round(frameCurrentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
             Math.round(frameCurrentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
           );
-          startNormal = new THREE.Vector3(0, 1, 0);
-        } else if (frameTargetVoxelPos) {
-          startPos = frameTargetVoxelPos;
-          startNormal = frameTargetNormal;
-        }
-
-        if (startPos) {
-          isPinching = true;
-          currentBuildNormal = startNormal;
-          initialBuildPos.copy(startPos);
           addVoxel(startPos);
           lastPlacedPos.copy(startPos);
+        } else if (frameTargetVoxelPos) {
+          startPos = frameTargetVoxelPos;
+          lastPlacedPos.copy(startPos); // Start tracking from the targeted voxel
+        }
+
+        if (startPos || frameTargetVoxelPos) {
+          isPinching = true;
+          currentBuildNormal = null; // Reset normal to determine it once movement starts
           lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
           lastBuildTime = now;
         }
-      } else if (now - lastBuildTime > BUILD_COOLDOWN && currentBuildNormal) {
+      } else if (now - lastBuildTime > BUILD_COOLDOWN) {
+        // Calculate delta from last pinch pos
         const handDelta = frameCurrentPinchWorldPos.clone().sub(lastPinchWorldPos);
-        const projectedDist = handDelta.dot(currentBuildNormal);
 
-        if (Math.abs(projectedDist) >= VOXEL_SIZE * 0.7) {
-          const steps = Math.sign(projectedDist);
-          const nextVoxelPos = lastPlacedPos.clone().add(currentBuildNormal.clone().multiplyScalar(steps * VOXEL_SIZE));
+        if (currentBuildNormal) {
+          // Direction is locked - build only along this axis
+          const projectedDist = handDelta.dot(currentBuildNormal);
+          if (Math.abs(projectedDist) >= VOXEL_SIZE * 0.6) {
+            const steps = Math.sign(projectedDist);
+            const nextVoxelPos = lastPlacedPos.clone().add(currentBuildNormal.clone().multiplyScalar(steps * VOXEL_SIZE));
 
-          if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
-            addVoxel(nextVoxelPos);
-            lastPlacedPos.copy(nextVoxelPos);
-            lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
-            lastBuildTime = now;
+            if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
+              addVoxel(nextVoxelPos);
+              lastPlacedPos.copy(nextVoxelPos);
+              lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
+              lastBuildTime = now;
+            }
+          }
+        } else {
+          // Determine the dominant axis of movement to lock it
+          const absX = Math.abs(handDelta.x);
+          const absY = Math.abs(handDelta.y);
+          const absZ = Math.abs(handDelta.z);
+          const maxDelta = Math.max(absX, absY, absZ);
+
+          if (maxDelta >= VOXEL_SIZE * 0.6) {
+            let moveDir = new THREE.Vector3();
+            if (maxDelta === absX) moveDir.set(Math.sign(handDelta.x), 0, 0);
+            else if (maxDelta === absY) moveDir.set(0, Math.sign(handDelta.y), 0);
+            else moveDir.set(0, 0, Math.sign(handDelta.z));
+
+            const nextVoxelPos = lastPlacedPos.clone().add(moveDir.clone().multiplyScalar(VOXEL_SIZE));
+
+            if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
+              addVoxel(nextVoxelPos);
+              lastPlacedPos.copy(nextVoxelPos);
+              lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
+              lastBuildTime = now;
+              currentBuildNormal = moveDir.clone(); // LOCK the direction
+            }
           }
         }
       }
@@ -460,8 +482,8 @@ function processPinch(results) {
         );
         previewVoxel.visible = true;
       } else if (frameTargetVoxelPos) {
-        previewVoxel.position.copy(frameTargetVoxelPos);
-        previewVoxel.visible = true;
+        // No preview when targeting existing voxel, just the selection highlight
+        previewVoxel.visible = false;
       } else {
         previewVoxel.visible = false;
       }
@@ -478,13 +500,13 @@ function processPinch(results) {
   } else if (isLeftGestureActive) {
     statusElement.innerText = "Rotating View...";
     statusElement.style.background = "rgba(255, 0, 255, 0.4)";
-  } else if (previewVoxel.visible) {
-    statusElement.innerText = "Targeting...";
-    statusElement.style.background = "rgba(255, 255, 255, 0.1)";
+  } else if (frameTargetVoxelPos) {
+    statusElement.innerText = "Pinch and drag to build from this block";
+    statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
     statusElement.innerText = "Left: Fist to Spin | Point to Tilt";
   } else if (isAnyBuildingHandDetected) {
-    statusElement.innerText = "Hover right hand over voxel to target";
+    statusElement.innerText = "Hover right hand over a block to start building";
   } else if (isAnyRotatingHandDetected) {
     statusElement.innerText = "Point/Fist and move left hand to rotate";
   } else {
