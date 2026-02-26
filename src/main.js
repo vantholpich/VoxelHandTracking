@@ -252,7 +252,22 @@ function updateHandMarkers(results, mapping) {
 
         vector.unproject(camera);
         const dir = vector.clone().sub(camera.position).normalize();
-        const distance = 8 - (landmark.z * 12);
+
+        // --- Improved Depth Estimation via Hand Scale ---
+        // Distance between wrist (0) and middle finger MCP (9)
+        const wrist = landmarks[0];
+        const mcp = landmarks[9];
+        const handScale = Math.sqrt(Math.pow(wrist.x - mcp.x, 2) + Math.pow(wrist.y - mcp.y, 2));
+
+        // --- Natural Depth Mapping (Direct Relationship) ---
+        // Hand further from webcam (lower scale) -> Voxel closer to camera
+        // Hand closer to webcam (higher scale) -> Voxel further from camera
+        const baseDistance = handScale * 25 + 2;
+
+        // Landmark.z is negative when closer to camera relative to the hand root
+        const relativeDepth = landmark.z * 10;
+        const distance = baseDistance + relativeDepth;
+
         const pos = camera.position.clone().add(dir.multiplyScalar(distance));
 
         marker.position.copy(pos);
@@ -452,7 +467,7 @@ function processPinch(results) {
           const absZ = Math.abs(handDelta.z);
           const maxDelta = Math.max(absX, absY, absZ);
 
-          if (maxDelta >= VOXEL_SIZE * 0.6) {
+          if (maxDelta >= VOXEL_SIZE * 1.2) { // Increased confidence threshold for initial lock
             let moveDir = new THREE.Vector3();
             if (maxDelta === absX) moveDir.set(Math.sign(handDelta.x), 0, 0);
             else if (maxDelta === absY) moveDir.set(0, Math.sign(handDelta.y), 0);
@@ -504,7 +519,7 @@ function processPinch(results) {
     statusElement.innerText = "Rotating View...";
     statusElement.style.background = "rgba(255, 0, 255, 0.4)";
   } else if (frameTargetVoxelPos) {
-    statusElement.innerText = "Pinch and drag to build from this block";
+    statusElement.innerText = "Pinch and drag (Left/Right, Up/Down, Near/Far)";
     statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
     statusElement.innerText = "Left: Fist to Spin | Point to Tilt";
