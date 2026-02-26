@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 // --- Configuration ---
 const VOXEL_SIZE = 1;
 const GRID_SIZE = 20;
-const PINCH_THRESHOLD = 0.05; // Slightly relaxed threshold
+const PINCH_THRESHOLD = 0.04; // Slightly relaxed for reliability
 const BUILD_COOLDOWN = 300; // Increased cooldown to prevent accidental multiple builds
 
 const HAND_CONNECTIONS = [
@@ -308,13 +308,18 @@ function processPinch(results) {
     selectionHighlight.visible = false;
     handCursors.forEach(c => c.visible = false);
     isLeftGestureActive = false;
-    currentBuildNormal = null; // Reset build normal if hands are gone
+    isPinching = false;
+    currentBuildNormal = null;
     return;
   }
 
-  // Track if any hand is providing building feedback (for status UI)
-  let isBuildingHandDetected = false;
-  let isRotatingHandDetected = false;
+  // Frame-level aggregate state
+  let frameTargetVoxelPos = null;
+  let frameTargetNormal = null;
+  let isAnyRotatingHandDetected = false;
+  let isAnyBuildingHandDetected = false;
+  let frameCurrentPinchWorldPos = null;
+  let framePinchDistance = 999;
 
   results.landmarks.forEach((landmarks, handIdx) => {
     const handedness = results.handedness[handIdx][0];
@@ -322,7 +327,6 @@ function processPinch(results) {
 
     const thumbTip = landmarks[4];
     const indexTip = landmarks[8];
-
     const distance = Math.sqrt(
       Math.pow(thumbTip.x - indexTip.x, 2) +
       Math.pow(thumbTip.y - indexTip.y, 2) +
@@ -332,18 +336,18 @@ function processPinch(results) {
     const m4 = handMarkers[handIdx * 21 + 4].position;
     const m8 = handMarkers[handIdx * 21 + 8].position;
     if (!m4 || !m8) return;
-    const currentPinchWorldPos = new THREE.Vector3().addVectors(m4, m8).multiplyScalar(0.5);
+    const currentHandPinchWorldPos = new THREE.Vector3().addVectors(m4, m8).multiplyScalar(0.5);
 
-    // Update 3D Cursor to follow index tip (landmark 8)
+    // Update 3D Cursor to follow index tip
     const cursor = handCursors[handIdx];
     if (cursor) {
-      cursor.position.copy(m8); // Landmark 8 is the index tip
+      cursor.position.copy(m8);
       cursor.material.color.set(isLeft ? 0xff00ff : 0x00ffff);
       cursor.visible = true;
     }
 
     if (isLeft) {
-      isRotatingHandDetected = true;
+      isAnyRotatingHandDetected = true;
       const clenched = isFist(landmarks);
       const pointing = isPointing(landmarks);
 
@@ -352,19 +356,12 @@ function processPinch(results) {
           isLeftGestureActive = true;
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         } else {
-          // Calculate movement delta in normalized screen space
           const deltaX = thumbTip.x - lastLeftHandPos.x;
           const deltaY = thumbTip.y - lastLeftHandPos.y;
           const sensitivity = 15.0;
 
-          if (pointing) {
-            // Pointing rotates Left/Right
-            controls.rotateLeft(-deltaX * sensitivity);
-          }
-          if (clenched) {
-            // Fist rotates Up/Down
-            controls.rotateUp(deltaY * sensitivity);
-          }
+          if (pointing) controls.rotateLeft(-deltaX * sensitivity);
+          if (clenched) controls.rotateUp(deltaY * sensitivity);
           controls.update();
 
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
@@ -373,111 +370,106 @@ function processPinch(results) {
         isLeftGestureActive = false;
       }
     } else {
-      // --- RIGHT HAND LOGIC: BUILDING ---
-      isBuildingHandDetected = true;
-      let targetVoxelPos = null;
+      // --- RIGHT HAND LOGIC: SELECTION & PINCH DETECTION ---
+      isAnyBuildingHandDetected = true;
+      frameCurrentPinchWorldPos = currentHandPinchWorldPos;
+      framePinchDistance = distance;
 
       if (voxels.length > 0) {
-        // Raycasting from camera through index tip (m8)
         const rayDir = m8.clone().sub(camera.position).normalize();
         raycaster.set(camera.position, rayDir);
-
         const intersects = raycaster.intersectObjects(voxels);
 
         if (intersects.length > 0) {
           const hit = intersects[0];
           const closestVoxel = hit.object;
-          const normal = hit.face.normal.clone().applyQuaternion(closestVoxel.quaternion);
-
-          targetVoxelPos = closestVoxel.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
-          selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
-          selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-          selectionHighlight.visible = true;
-        } else {
-          selectionHighlight.visible = false;
-          targetVoxelPos = null;
-        }
-      } else {
-        selectionHighlight.visible = false;
-      }
-
-      if (distance < PINCH_THRESHOLD) {
-        const now = performance.now();
-        if (!isPinching) {
-          let firstPos = null;
-          let normal = null;
-
-          if (voxels.length === 0) {
-            // First voxel in empty scene
-            firstPos = new THREE.Vector3(
-              Math.round(currentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
-              Math.round(currentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
-              Math.round(currentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
-            );
-            // Default normal for empty scene (Up)
-            normal = new THREE.Vector3(0, 1, 0);
-          } else {
-            // Building on a selected face
-            const rayDir = m8.clone().sub(camera.position).normalize();
-            raycaster.set(camera.position, rayDir);
-            const intersects = raycaster.intersectObjects(voxels);
-
-            if (intersects.length > 0) {
-              const hit = intersects[0];
-              normal = hit.face.normal.clone().applyQuaternion(hit.object.quaternion);
-              firstPos = hit.object.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
-            }
-          }
-
-          if (firstPos) {
-            isPinching = true;
-            currentBuildNormal = normal;
-            initialBuildPos.copy(firstPos);
-            addVoxel(firstPos);
-            lastPlacedPos.copy(firstPos);
-            lastPinchWorldPos.copy(currentPinchWorldPos);
-            lastBuildTime = now;
-          }
-        } else if (now - lastBuildTime > BUILD_COOLDOWN && currentBuildNormal) {
-          // --- STRAIGHT LINE EXTRUSION LOGIC ---
-          // Project current hand movement onto the locked axis (currentBuildNormal)
-          const handDelta = currentPinchWorldPos.clone().sub(lastPinchWorldPos);
-          const projectedDist = handDelta.dot(currentBuildNormal);
-
-          if (Math.abs(projectedDist) >= VOXEL_SIZE * 0.7) {
-            const steps = Math.sign(projectedDist);
-            const nextVoxelPos = lastPlacedPos.clone().add(currentBuildNormal.clone().multiplyScalar(steps * VOXEL_SIZE));
-
-            if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
-              addVoxel(nextVoxelPos);
-              lastPlacedPos.copy(nextVoxelPos);
-              lastPinchWorldPos.copy(currentPinchWorldPos);
-              lastBuildTime = now;
-            }
-          }
-        }
-        previewVoxel.visible = false;
-      } else {
-        if (distance > PINCH_THRESHOLD + 0.01) {
-          isPinching = false;
-          currentBuildNormal = null;
-        }
-        if (voxels.length === 0) {
-          previewVoxel.position.set(
-            Math.round(currentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
-            Math.round(currentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
-            Math.round(currentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
-          );
-          previewVoxel.visible = true;
-        } else if (targetVoxelPos) {
-          previewVoxel.position.copy(targetVoxelPos);
-          previewVoxel.visible = true;
-        } else {
-          previewVoxel.visible = false;
+          frameTargetNormal = hit.face.normal.clone().applyQuaternion(closestVoxel.quaternion);
+          frameTargetVoxelPos = closestVoxel.position.clone().add(frameTargetNormal.clone().multiplyScalar(VOXEL_SIZE));
         }
       }
     }
   });
+
+  // --- GLOBAL STATE UPDATE & BUILDING ---
+  if (isAnyBuildingHandDetected) {
+    // 1. Update Selection Highlight
+    if (frameTargetVoxelPos && !isPinching) {
+      selectionHighlight.position.copy(frameTargetVoxelPos).sub(frameTargetNormal.clone().multiplyScalar(VOXEL_SIZE * 0.49));
+      selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), frameTargetNormal);
+      selectionHighlight.visible = true;
+    } else {
+      selectionHighlight.visible = false;
+    }
+
+    // 2. Process Pinch State
+    if (framePinchDistance < PINCH_THRESHOLD) {
+      const now = performance.now();
+      if (!isPinching) {
+        let startPos = null;
+        let startNormal = null;
+
+        if (voxels.length === 0) {
+          startPos = new THREE.Vector3(
+            Math.round(frameCurrentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
+            Math.round(frameCurrentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
+            Math.round(frameCurrentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
+          );
+          startNormal = new THREE.Vector3(0, 1, 0);
+        } else if (frameTargetVoxelPos) {
+          startPos = frameTargetVoxelPos;
+          startNormal = frameTargetNormal;
+        }
+
+        if (startPos) {
+          isPinching = true;
+          currentBuildNormal = startNormal;
+          initialBuildPos.copy(startPos);
+          addVoxel(startPos);
+          lastPlacedPos.copy(startPos);
+          lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
+          lastBuildTime = now;
+        }
+      } else if (now - lastBuildTime > BUILD_COOLDOWN && currentBuildNormal) {
+        const handDelta = frameCurrentPinchWorldPos.clone().sub(lastPinchWorldPos);
+        const projectedDist = handDelta.dot(currentBuildNormal);
+
+        if (Math.abs(projectedDist) >= VOXEL_SIZE * 0.7) {
+          const steps = Math.sign(projectedDist);
+          const nextVoxelPos = lastPlacedPos.clone().add(currentBuildNormal.clone().multiplyScalar(steps * VOXEL_SIZE));
+
+          if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
+            addVoxel(nextVoxelPos);
+            lastPlacedPos.copy(nextVoxelPos);
+            lastPinchWorldPos.copy(frameCurrentPinchWorldPos);
+            lastBuildTime = now;
+          }
+        }
+      }
+      previewVoxel.visible = false;
+    } else {
+      if (framePinchDistance > PINCH_THRESHOLD + 0.01) {
+        isPinching = false;
+        currentBuildNormal = null;
+      }
+      // 3. Update Preview Voxel
+      if (voxels.length === 0) {
+        previewVoxel.position.set(
+          Math.round(frameCurrentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
+          Math.round(frameCurrentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
+          Math.round(frameCurrentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
+        );
+        previewVoxel.visible = true;
+      } else if (frameTargetVoxelPos) {
+        previewVoxel.position.copy(frameTargetVoxelPos);
+        previewVoxel.visible = true;
+      } else {
+        previewVoxel.visible = false;
+      }
+    }
+  } else {
+    previewVoxel.visible = false;
+    selectionHighlight.visible = false;
+  }
 
   // Update Status UI
   if (isPinching) {
@@ -489,27 +481,22 @@ function processPinch(results) {
   } else if (previewVoxel.visible) {
     statusElement.innerText = "Targeting...";
     statusElement.style.background = "rgba(255, 255, 255, 0.1)";
-  } else if (isRotatingHandDetected && isBuildingHandDetected) {
+  } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
     statusElement.innerText = "Left: Point to Spin | Fist to Tilt";
-  } else if (isBuildingHandDetected) {
+  } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over voxel to target";
-  } else if (isRotatingHandDetected) {
+  } else if (isAnyRotatingHandDetected) {
     statusElement.innerText = "Point/Fist and move left hand to rotate";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
 
-  // Cleanup visibility if hands are missing
-  if (!isBuildingHandDetected) {
-    previewVoxel.visible = false;
-    selectionHighlight.visible = false;
-  }
   // Hide inactive cursors
   handCursors.forEach((cursor, idx) => {
     if (!results.landmarks[idx]) cursor.visible = false;
   });
 
-  if (!isRotatingHandDetected) {
+  if (!isAnyRotatingHandDetected) {
     isLeftGestureActive = false;
   }
 }
