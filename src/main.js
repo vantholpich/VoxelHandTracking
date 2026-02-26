@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 // --- Configuration ---
 const VOXEL_SIZE = 1;
 const GRID_SIZE = 20;
-const PINCH_THRESHOLD = 0.03; // Slightly relaxed threshold
+const PINCH_THRESHOLD = 0.025; // Slightly relaxed threshold
 const BUILD_COOLDOWN = 300; // Increased cooldown to prevent accidental multiple builds
 
 const HAND_CONNECTIONS = [
@@ -346,7 +346,6 @@ function processPinch(results) {
     statusElement.innerText = "Building Line...";
     statusElement.style.background = "rgba(0, 255, 0, 0.4)";
     previewVoxel.visible = false;
-    selectionHighlight.visible = false;
   } else {
     // --- NOT PINCHING ---
     if (distance > PINCH_THRESHOLD + 0.01) {
