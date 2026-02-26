@@ -391,7 +391,10 @@ function processPinch(results) {
   // --- GLOBAL STATE UPDATE & BUILDING ---
   if (isAnyBuildingHandDetected) {
     // 1. Update Selection Highlight
-    if (frameTargetVoxelPos && !isPinching) {
+    if (isPinching) {
+      selectionHighlight.position.copy(lastPlacedPos);
+      selectionHighlight.visible = true;
+    } else if (frameTargetVoxelPos) {
       selectionHighlight.position.copy(frameTargetVoxelPos);
       selectionHighlight.visible = true;
     } else {
