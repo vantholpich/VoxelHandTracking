@@ -34,6 +34,18 @@ body {
   z-index: 2;
 }
 
+#gesture-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10;
+  pointer-events: none;
+  transform: scaleX(-1);
+  /* Mirror the 2D drawing since camera is mirrored */
+}
+
 #ui {
   position: absolute;
   top: 20px;

@@ -35,6 +35,8 @@ let handLines = []; // lines for connections
 // --- Elements ---
 const videoElement = document.getElementById('webcam');
 const threeContainer = document.getElementById('three-container');
+const canvas2d = document.getElementById('gesture-canvas');
+const ctx2d = canvas2d.getContext('2d');
 const statusElement = document.getElementById('status');
 
 // --- Initialization ---
@@ -91,29 +93,26 @@ function setupThree() {
   previewVoxel.visible = false;
   scene.add(previewVoxel);
 
-  // Initial hand markers pool
-  const markerGeo = new THREE.SphereGeometry(0.05, 8, 8);
-  const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+  // Invisible 3D markers for depth/building calculations
   for (let i = 0; i < 21; i++) {
-    const marker = new THREE.Mesh(markerGeo, markerMat);
-    marker.visible = false;
+    const marker = new THREE.Object3D();
     scene.add(marker);
     handMarkers.push(marker);
   }
 
-  // Hand lines pool
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 });
-  HAND_CONNECTIONS.forEach(() => {
-    const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-    const line = new THREE.Line(geometry, lineMat);
-    line.visible = false;
-    scene.add(line);
-    handLines.push(line);
-  });
-
   clock = new THREE.Clock();
 
   window.addEventListener('resize', onWindowResize);
+  onWindowResize(); // Set initial dimensions
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  canvas2d.width = window.innerWidth;
+  canvas2d.height = window.innerHeight;
 }
 
 async function setupHandTracking() {
@@ -138,12 +137,6 @@ function setupWebcam() {
   });
 }
 
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
 // --- Logic ---
 
 function animate() {
@@ -162,43 +155,50 @@ function animate() {
 }
 
 function updateHandMarkers(results) {
-  // Hide all first
-  handMarkers.forEach(m => m.visible = false);
-  handLines.forEach(l => l.visible = false);
+  // Clear 2D Canvas
+  ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
 
   if (results.landmarks && results.landmarks.length > 0) {
     const landmarks = results.landmarks[0];
 
-    // Update marker positions
+    // 1. Draw 2D Hand Connections
+    ctx2d.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+    ctx2d.lineWidth = 2;
+    HAND_CONNECTIONS.forEach(([startIdx, endIdx]) => {
+      const start = landmarks[startIdx];
+      const end = landmarks[endIdx];
+
+      ctx2d.beginPath();
+      ctx2d.moveTo(start.x * canvas2d.width, start.y * canvas2d.height);
+      ctx2d.lineTo(end.x * canvas2d.width, end.y * canvas2d.height);
+      ctx2d.stroke();
+    });
+
+    // 2. Draw 2D Hand Landmarks (points)
+    ctx2d.fillStyle = '#00ffff';
+    landmarks.forEach((landmark) => {
+      ctx2d.beginPath();
+      ctx2d.arc(landmark.x * canvas2d.width, landmark.y * canvas2d.height, 4, 0, Math.PI * 2);
+      ctx2d.fill();
+    });
+
+    // 3. Update Invisible 3D markers for depth/building logic
     landmarks.forEach((landmark, i) => {
       const marker = handMarkers[i];
 
-      // Mirror X
+      // Mirror X for AR alignment
       const vector = new THREE.Vector3(
-        -((landmark.x * 2) - 1), // INVERTED for mirrored view
+        -((landmark.x * 2) - 1),
         - (landmark.y * 2) + 1,
         0.5
       );
 
       vector.unproject(camera);
       const dir = vector.clone().sub(camera.position).normalize();
-      // Smoother depth estimation
       const distance = 8 - (landmark.z * 12);
       const pos = camera.position.clone().add(dir.multiplyScalar(distance));
 
       marker.position.copy(pos);
-      marker.visible = true;
-    });
-
-    // Update line positions
-    HAND_CONNECTIONS.forEach((connection, i) => {
-      const line = handLines[i];
-      const start = handMarkers[connection[0]].position;
-      const end = handMarkers[connection[1]].position;
-
-      const points = [start, end];
-      line.geometry.setFromPoints(points);
-      line.visible = true;
     });
   }
 }
@@ -219,32 +219,47 @@ function processPinch(results) {
     Math.pow(thumbTip.z - indexTip.z, 2)
   );
 
-  // NDC coordinates of the pinch center
-  const pinchX = (thumbTip.x + indexTip.x) / 2;
-  const pinchY = (thumbTip.y + indexTip.y) / 2;
-  // Mirrored X for NDC
-  const ndcX = -((pinchX * 2) - 1);
-  const ndcY = - (pinchY * 2) + 1;
-
-  // Use raycaster for establishing the FIRST voxel in a sequence 
-  // or for the preview before pinching
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
-  const intersects = raycaster.intersectObjects(voxels);
-
-  let targetVoxelPos = null;
-  if (intersects.length > 0) {
-    const intersect = intersects[0];
-    const p = intersect.object.position.clone();
-    p.add(intersect.face.normal.clone().multiplyScalar(VOXEL_SIZE));
-    targetVoxelPos = p;
-  }
-
-  // World position of the physical pinch for movement tracking
+  // World position of the physical pinch for movement tracking and proximity
   const m4 = handMarkers[4].position;
   const m8 = handMarkers[8].position;
   if (!m4 || !m8) return; // Guard
   const currentPinchWorldPos = new THREE.Vector3().addVectors(m4, m8).multiplyScalar(0.5);
+
+  let targetVoxelPos = null;
+  const TOUCH_THRESHOLD = VOXEL_SIZE * 1.5;
+
+  if (voxels.length > 0) {
+    // PHYSICAL CURSOR LOGIC: Find the closest voxel center
+    let closestVoxel = null;
+    let minDist = TOUCH_THRESHOLD;
+
+    voxels.forEach(v => {
+      const d = v.position.distanceTo(currentPinchWorldPos);
+      if (d < minDist) {
+        minDist = d;
+        closestVoxel = v;
+      }
+    });
+
+    if (closestVoxel) {
+      // Find which face we are closest to
+      const diff = currentPinchWorldPos.clone().sub(closestVoxel.position);
+      const absX = Math.abs(diff.x);
+      const absY = Math.abs(diff.y);
+      const absZ = Math.abs(diff.z);
+
+      const normal = new THREE.Vector3();
+      if (absX >= absY && absX >= absZ) {
+        normal.x = diff.x > 0 ? 1 : -1;
+      } else if (absY >= absX && absY >= absZ) {
+        normal.y = diff.y > 0 ? 1 : -1;
+      } else {
+        normal.z = diff.z > 0 ? 1 : -1;
+      }
+
+      targetVoxelPos = closestVoxel.position.clone().add(normal.multiplyScalar(VOXEL_SIZE));
+    }
+  }
 
   if (distance < PINCH_THRESHOLD) {
     const now = performance.now();
