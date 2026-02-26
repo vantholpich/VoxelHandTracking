@@ -25,6 +25,7 @@ let lastVideoTime = -1;
 let voxels = [];
 let previewVoxel;
 let selectionHighlight;
+const raycaster = new THREE.Raycaster();
 let isPinching = false;
 let lastBuildTime = 0;
 let lastPlacedPos = new THREE.Vector3();
@@ -351,48 +352,23 @@ function processPinch(results) {
       // --- RIGHT HAND LOGIC: BUILDING ---
       isBuildingHandDetected = true;
       let targetVoxelPos = null;
-      const TOUCH_THRESHOLD = VOXEL_SIZE * 1.5;
 
       if (voxels.length > 0) {
-        let closestVoxel = null;
-        let minDist = TOUCH_THRESHOLD;
+        // Raycasting from camera through index tip (m8)
+        const rayDir = m8.clone().sub(camera.position).normalize();
+        raycaster.set(camera.position, rayDir);
 
-        voxels.forEach(v => {
-          const d = v.position.distanceTo(currentPinchWorldPos);
-          if (d < minDist) {
-            minDist = d;
-            closestVoxel = v;
-          }
-        });
+        const intersects = raycaster.intersectObjects(voxels);
 
-        if (closestVoxel) {
-          const diff = currentPinchWorldPos.clone().sub(closestVoxel.position);
-          const absX = Math.abs(diff.x);
-          const absY = Math.abs(diff.y);
-          const absZ = Math.abs(diff.z);
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const closestVoxel = hit.object;
+          const normal = hit.face.normal.clone().applyQuaternion(closestVoxel.quaternion);
 
-          const normal = new THREE.Vector3();
-          if (absX >= absY && absX >= absZ) {
-            normal.x = diff.x > 0 ? 1 : -1;
-          } else if (absY >= absX && absY >= absZ) {
-            normal.y = diff.y > 0 ? 1 : -1;
-          } else {
-            normal.z = diff.z > 0 ? 1 : -1;
-          }
-
-          // Visibility Check: Only interact if face is towards the camera
-          const faceToCamera = camera.position.clone().sub(closestVoxel.position).normalize();
-          const dot = normal.dot(faceToCamera);
-
-          if (dot > 0.1) {
-            targetVoxelPos = closestVoxel.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
-            selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
-            selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-            selectionHighlight.visible = true;
-          } else {
-            selectionHighlight.visible = false;
-            targetVoxelPos = null;
-          }
+          targetVoxelPos = closestVoxel.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
+          selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
+          selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+          selectionHighlight.visible = true;
         } else {
           selectionHighlight.visible = false;
           targetVoxelPos = null;
