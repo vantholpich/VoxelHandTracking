@@ -401,43 +401,59 @@ function processPinch(results) {
       if (distance < PINCH_THRESHOLD) {
         const now = performance.now();
         if (!isPinching) {
-          isPinching = true;
           let firstPos = null;
           if (voxels.length === 0) {
+            // First voxel in empty scene
             firstPos = new THREE.Vector3(
               Math.round(currentPinchWorldPos.x / VOXEL_SIZE) * VOXEL_SIZE,
               Math.round(currentPinchWorldPos.y / VOXEL_SIZE) * VOXEL_SIZE,
               Math.round(currentPinchWorldPos.z / VOXEL_SIZE) * VOXEL_SIZE
             );
           } else if (targetVoxelPos) {
+            // Building on a selected face
             firstPos = targetVoxelPos;
           }
+
           if (firstPos) {
+            isPinching = true;
             addVoxel(firstPos);
             lastPlacedPos.copy(firstPos);
             lastPinchWorldPos.copy(currentPinchWorldPos);
             lastBuildTime = now;
           }
         } else if (now - lastBuildTime > BUILD_COOLDOWN) {
-          const delta = currentPinchWorldPos.clone().sub(lastPinchWorldPos);
-          const moveDist = delta.length();
-          if (moveDist >= VOXEL_SIZE * 0.5) {
-            const absX = Math.abs(delta.x);
-            const absY = Math.abs(delta.y);
-            const absZ = Math.abs(delta.z);
-            const nextVoxelPos = lastPlacedPos.clone();
-            if (absX >= absY && absX >= absZ) {
-              nextVoxelPos.x += (delta.x > 0 ? 1 : -1) * VOXEL_SIZE;
-            } else if (absY >= absX && absY >= absZ) {
-              nextVoxelPos.y += (delta.y > 0 ? 1 : -1) * VOXEL_SIZE;
-            } else {
-              nextVoxelPos.z += (delta.z > 0 ? 1 : -1) * VOXEL_SIZE;
-            }
-            if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
-              addVoxel(nextVoxelPos);
-              lastPlacedPos.copy(nextVoxelPos);
+          // If already pinching, prioritize painting on surface
+          if (targetVoxelPos) {
+            if (targetVoxelPos.distanceTo(lastPlacedPos) > 0.1) {
+              addVoxel(targetVoxelPos);
+              lastPlacedPos.copy(targetVoxelPos);
               lastPinchWorldPos.copy(currentPinchWorldPos);
               lastBuildTime = now;
+            }
+          } else {
+            // If dragging into empty air, continue the line (extrusion/drawing)
+            const delta = currentPinchWorldPos.clone().sub(lastPinchWorldPos);
+            const moveDist = delta.length();
+            if (moveDist >= VOXEL_SIZE * 0.7) {
+              const absX = Math.abs(delta.x);
+              const absY = Math.abs(delta.y);
+              const absZ = Math.abs(delta.z);
+              const nextVoxelPos = lastPlacedPos.clone();
+
+              if (absX >= absY && absX >= absZ) {
+                nextVoxelPos.x += (delta.x > 0 ? 1 : -1) * VOXEL_SIZE;
+              } else if (absY >= absX && absY >= absZ) {
+                nextVoxelPos.y += (delta.y > 0 ? 1 : -1) * VOXEL_SIZE;
+              } else {
+                nextVoxelPos.z += (delta.z > 0 ? 1 : -1) * VOXEL_SIZE;
+              }
+
+              if (!voxels.some(v => v.position.distanceTo(nextVoxelPos) < 0.1)) {
+                addVoxel(nextVoxelPos);
+                lastPlacedPos.copy(nextVoxelPos);
+                lastPinchWorldPos.copy(currentPinchWorldPos);
+                lastBuildTime = now;
+              }
             }
           }
         }
@@ -463,7 +479,7 @@ function processPinch(results) {
 
   // Update Status UI
   if (isPinching) {
-    statusElement.innerText = "Building Line...";
+    statusElement.innerText = "Building...";
     statusElement.style.background = "rgba(0, 255, 0, 0.4)";
   } else if (isLeftGestureActive) {
     statusElement.innerText = "Rotating View...";
