@@ -380,12 +380,22 @@ function processPinch(results) {
             normal.z = diff.z > 0 ? 1 : -1;
           }
 
-          targetVoxelPos = closestVoxel.position.clone().add(normal.multiplyScalar(VOXEL_SIZE));
-          selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
-          selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-          selectionHighlight.visible = true;
+          // Visibility Check: Only interact if face is towards the camera
+          const faceToCamera = camera.position.clone().sub(closestVoxel.position).normalize();
+          const dot = normal.dot(faceToCamera);
+
+          if (dot > 0.1) {
+            targetVoxelPos = closestVoxel.position.clone().add(normal.clone().multiplyScalar(VOXEL_SIZE));
+            selectionHighlight.position.copy(closestVoxel.position).add(normal.clone().multiplyScalar(VOXEL_SIZE * 0.51));
+            selectionHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+            selectionHighlight.visible = true;
+          } else {
+            selectionHighlight.visible = false;
+            targetVoxelPos = null;
+          }
         } else {
           selectionHighlight.visible = false;
+          targetVoxelPos = null;
         }
       } else {
         selectionHighlight.visible = false;
