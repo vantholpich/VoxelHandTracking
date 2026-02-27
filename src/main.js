@@ -331,7 +331,15 @@ function isGrip(landmarks) {
     const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
     if (dTip < dBase) curledCount++;
   }
-  return curledCount >= 3;
+
+  // Thumb (4) should be extended
+  const thumbTip = landmarks[4];
+  const thumbBase = landmarks[2];
+  const dThumbTip = Math.sqrt(Math.pow(thumbTip.x - wrist.x, 2) + Math.pow(thumbTip.y - wrist.y, 2));
+  const dThumbBase = Math.sqrt(Math.pow(thumbBase.x - wrist.x, 2) + Math.pow(thumbBase.y - wrist.y, 2));
+  const thumbExtended = dThumbTip > dThumbBase;
+
+  return (curledCount >= 3) && thumbExtended;
 }
 
 function processPinch(results) {
@@ -562,11 +570,11 @@ function processPinch(results) {
     statusElement.innerText = "Pinch and drag (Right Hand) to Build";
     statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
-    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Other fingers closed)";
+    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Thumb extended, others curled)";
   } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over a block to start building";
   } else if (isAnyRotatingHandDetected) {
-    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Other fingers closed)";
+    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Thumb extended, others curled)";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
