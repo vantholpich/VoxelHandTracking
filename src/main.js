@@ -676,10 +676,8 @@ function addVoxel(pos) {
   if (exists) return;
 
   const geo = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
-  const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(Math.random(), 0.7, 0.6),
-    metalness: 0.2,
-    roughness: 0.1,
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
     wireframe: true
   });
   const voxel = new THREE.Mesh(geo, mat);
@@ -688,4 +686,12 @@ function addVoxel(pos) {
   voxels.push(voxel);
 }
 
-init();
+init().then(() => {
+  // Update any existing voxels to pure white basic material
+  voxels.forEach(v => {
+    v.material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      wireframe: true
+    });
+  });
+});
