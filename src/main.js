@@ -38,6 +38,7 @@ let isLeftGestureActive = false;
 let lastLeftHandPos = new THREE.Vector2();
 let currentBuildNormal = null;
 let initialBuildPos = new THREE.Vector3();
+let lastLeftPinchDistance = 0; // State for zoom gesture
 
 // --- Elements ---
 const videoElement = document.getElementById('webcam');
@@ -317,6 +318,22 @@ function isPointing(landmarks) {
   return curledCount >= 3;
 }
 
+function isGrip(landmarks) {
+  const fingerTips = [12, 16, 20]; // Middle, Ring, Pinky
+  const fingerBases = [9, 13, 17];
+  const wrist = landmarks[0];
+
+  let curledCount = 0;
+  for (let i = 0; i < 3; i++) {
+    const tip = landmarks[fingerTips[i]];
+    const base = landmarks[fingerBases[i]];
+    const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+    const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
+    if (dTip < dBase) curledCount++;
+  }
+  return curledCount >= 3;
+}
+
 function processPinch(results) {
   if (!results.landmarks || results.landmarks.length === 0) {
     previewVoxel.visible = false;
@@ -364,25 +381,48 @@ function processPinch(results) {
     if (isLeft) {
       isAnyRotatingHandDetected = true;
       const clenched = isFist(landmarks);
-      const pointing = isPointing(landmarks);
 
-      if (clenched || pointing) {
+      if (clenched) {
         if (!isLeftGestureActive) {
           isLeftGestureActive = true;
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         } else {
           const deltaX = thumbTip.x - lastLeftHandPos.x;
-          const deltaY = thumbTip.y - lastLeftHandPos.y;
+          // Horizontal move only -> Spin
           const sensitivity = 15.0;
-
-          if (clenched) controls.rotateLeft(-deltaX * sensitivity);
-          if (pointing) controls.rotateUp(deltaY * sensitivity);
+          controls.rotateLeft(-deltaX * sensitivity);
           controls.update();
 
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         }
+      } else if (isGrip(landmarks)) {
+        // --- ZOOM LOGIC (Left Hand) ---
+        // Only zoom if middle, ring, pinky are curled (isGrip)
+        isLeftGestureActive = false;
+
+        // Removed distance < threshold check to allow for wide spreading
+        if (lastLeftPinchDistance > 0) {
+          const deltaDist = distance - lastLeftPinchDistance;
+          const zoomSensitivity = 15.0; // Reduced for smoother control
+
+          if (Math.abs(deltaDist) > 0.001) {
+            // Inverting logic: User reports spread = further. 
+            // We swap so spread (deltaDist > 0) -> dollyIn (closer)
+            // Wait, if users says spread CURRENTLY makes it further, and my code has dollyIn...
+            // Then dollyIn is making it further? That's impossible.
+            // Let's swap the functions as requested.
+            if (deltaDist > 0) {
+              controls.dollyOut(1 + deltaDist * zoomSensitivity);
+            } else {
+              controls.dollyIn(1 - deltaDist * zoomSensitivity);
+            }
+            controls.update();
+          }
+        }
+        lastLeftPinchDistance = distance;
       } else {
         isLeftGestureActive = false;
+        lastLeftPinchDistance = 0;
       }
     } else {
       // --- RIGHT HAND LOGIC: SELECTION & PINCH DETECTION ---
@@ -519,14 +559,14 @@ function processPinch(results) {
     statusElement.innerText = "Rotating View...";
     statusElement.style.background = "rgba(255, 0, 255, 0.4)";
   } else if (frameTargetVoxelPos) {
-    statusElement.innerText = "Pinch and drag (Left/Right, Up/Down, Near/Far)";
+    statusElement.innerText = "Pinch and drag (Right Hand) to Build";
     statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
-    statusElement.innerText = "Left: Fist to Spin | Point to Tilt";
+    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Other fingers closed)";
   } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over a block to start building";
   } else if (isAnyRotatingHandDetected) {
-    statusElement.innerText = "Point/Fist and move left hand to rotate";
+    statusElement.innerText = "Left: Fist to Spin | Spread/Pinch to Zoom (Other fingers closed)";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
