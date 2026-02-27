@@ -356,6 +356,37 @@ function isThreeFingerPose(landmarks) {
   return true;
 }
 
+function isTiltingPose(landmarks) {
+  const wrist = landmarks[0];
+
+  // Thumb (4) extended
+  const thumbTip = landmarks[4];
+  const thumbBase = landmarks[2];
+  const dThumbTip = Math.sqrt(Math.pow(thumbTip.x - wrist.x, 2) + Math.pow(thumbTip.y - wrist.y, 2));
+  const dThumbBase = Math.sqrt(Math.pow(thumbBase.x - wrist.x, 2) + Math.pow(thumbBase.y - wrist.y, 2));
+  if (dThumbTip <= dThumbBase) return false;
+
+  // Index (8), Middle (12), Ring (16) extended
+  const extendedTips = [8, 12, 16];
+  const extendedBases = [5, 9, 13];
+  for (let i = 0; i < 3; i++) {
+    const tip = landmarks[extendedTips[i]];
+    const base = landmarks[extendedBases[i]];
+    const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+    const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
+    if (dTip <= dBase * 1.2) return false;
+  }
+
+  // Pinky (20) curled
+  const pinkyTip = landmarks[20];
+  const pinkyBase = landmarks[17];
+  const dPinkyTip = Math.sqrt(Math.pow(pinkyTip.x - wrist.x, 2) + Math.pow(pinkyTip.y - wrist.y, 2));
+  const dPinkyBase = Math.sqrt(Math.pow(pinkyBase.x - wrist.x, 2) + Math.pow(pinkyBase.y - wrist.y, 2));
+  if (dPinkyTip >= dPinkyBase) return false;
+
+  return true;
+}
+
 function isGrip(landmarks) {
   const fingerTips = [12, 16, 20]; // Middle, Ring, Pinky
   const fingerBases = [9, 13, 17];
@@ -426,19 +457,24 @@ function processPinch(results) {
 
     if (isLeft) {
       isAnyRotatingHandDetected = true;
-      const rotationPose = isThreeFingerPose(landmarks);
+      const spinning = isThreeFingerPose(landmarks);
+      const tilting = isTiltingPose(landmarks);
 
-      if (rotationPose) {
+      if (spinning || tilting) {
         if (!isLeftGestureActive) {
           isLeftGestureActive = true;
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         } else {
-          const deltaX = thumbTip.x - lastLeftHandPos.x;
-          // Horizontal move only -> Spin
           const sensitivity = 15.0;
-          controls.rotateLeft(-deltaX * sensitivity);
+          if (spinning) {
+            const deltaX = thumbTip.x - lastLeftHandPos.x;
+            controls.rotateLeft(-deltaX * sensitivity);
+          }
+          if (tilting) {
+            const deltaY = thumbTip.y - lastLeftHandPos.y;
+            controls.rotateUp(deltaY * sensitivity);
+          }
           controls.update();
-
           lastLeftHandPos.set(thumbTip.x, thumbTip.y);
         }
       } else if (isGrip(landmarks)) {
@@ -608,11 +644,11 @@ function processPinch(results) {
     statusElement.innerText = "Pinch and drag (Right Hand) to Build";
     statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
-    statusElement.innerText = "Left: 3-Fingers to Spin | Spread/Pinch to Zoom";
+    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Spread/Pinch Zoom";
   } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over a block to start building";
   } else if (isAnyRotatingHandDetected) {
-    statusElement.innerText = "Left: 3-Fingers to Spin | Spread/Pinch to Zoom";
+    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Spread/Pinch Zoom";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
