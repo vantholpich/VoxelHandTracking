@@ -388,27 +388,34 @@ function isTiltingPose(landmarks) {
 }
 
 function isGrip(landmarks) {
-  const fingerTips = [12, 16, 20]; // Middle, Ring, Pinky
-  const fingerBases = [9, 13, 17];
   const wrist = landmarks[0];
 
+  // Middle (12) and Ring (16) should be curled
+  const curledTips = [12, 16];
+  const curledBases = [9, 13];
   let curledCount = 0;
-  for (let i = 0; i < 3; i++) {
-    const tip = landmarks[fingerTips[i]];
-    const base = landmarks[fingerBases[i]];
+  for (let i = 0; i < 2; i++) {
+    const tip = landmarks[curledTips[i]];
+    const base = landmarks[curledBases[i]];
     const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
     const dBase = Math.sqrt(Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2));
     if (dTip < dBase) curledCount++;
   }
 
-  // Thumb (4) should be extended
+  // Thumb (4) and Pinky (20) should be extended
   const thumbTip = landmarks[4];
   const thumbBase = landmarks[2];
   const dThumbTip = Math.sqrt(Math.pow(thumbTip.x - wrist.x, 2) + Math.pow(thumbTip.y - wrist.y, 2));
   const dThumbBase = Math.sqrt(Math.pow(thumbBase.x - wrist.x, 2) + Math.pow(thumbBase.y - wrist.y, 2));
   const thumbExtended = dThumbTip > dThumbBase;
 
-  return (curledCount >= 3) && thumbExtended;
+  const pinkyTip = landmarks[20];
+  const pinkyBase = landmarks[17];
+  const dPinkyTip = Math.sqrt(Math.pow(pinkyTip.x - wrist.x, 2) + Math.pow(pinkyTip.y - wrist.y, 2));
+  const dPinkyBase = Math.sqrt(Math.pow(pinkyBase.x - wrist.x, 2) + Math.pow(pinkyBase.y - wrist.y, 2));
+  const pinkyExtended = dPinkyTip > dPinkyBase;
+
+  return (curledCount >= 2) && thumbExtended && pinkyExtended;
 }
 
 function processPinch(results) {
@@ -644,11 +651,11 @@ function processPinch(results) {
     statusElement.innerText = "Pinch and drag (Right Hand) to Build";
     statusElement.style.background = "rgba(0, 255, 255, 0.2)";
   } else if (isAnyRotatingHandDetected && isAnyBuildingHandDetected) {
-    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Spread/Pinch Zoom";
+    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Pinky-Out Zoom";
   } else if (isAnyBuildingHandDetected) {
     statusElement.innerText = "Hover right hand over a block to start building";
   } else if (isAnyRotatingHandDetected) {
-    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Spread/Pinch Zoom";
+    statusElement.innerText = "Left: 3-Fingers Spin | 4-Fingers Tilt | Pinky-Out Zoom";
   } else {
     statusElement.innerText = "Waiting for hands...";
   }
