@@ -20,6 +20,7 @@ const HAND_CONNECTIONS = [
 // --- State ---
 let scene, camera, renderer, clock, controls;
 let handLandmarker;
+let audioListener, blockSound;
 let webcam;
 let lastVideoTime = -1;
 let voxels = [];
@@ -78,6 +79,17 @@ function setupThree() {
   controls.minDistance = 5;
   controls.maxDistance = 50;
   controls.maxPolarAngle = Math.PI / 2;
+
+  // Audio setup
+  audioListener = new THREE.AudioListener();
+  camera.add(audioListener);
+  blockSound = new THREE.Audio(audioListener);
+
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load('/audio/pop.mp3', (buffer) => {
+    blockSound.setBuffer(buffer);
+    blockSound.setVolume(0.5);
+  });
 
   // Lights
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -696,6 +708,12 @@ function addVoxel(pos) {
   group.position.copy(pos);
   scene.add(group);
   voxels.push(group);
+
+  // Play placement sound
+  if (blockSound && blockSound.buffer) {
+    if (blockSound.isPlaying) blockSound.stop();
+    blockSound.play();
+  }
 }
 
 init().then(() => {
