@@ -534,11 +534,12 @@ function processPinch(results) {
       if (voxels.length > 0) {
         const rayDir = m8.clone().sub(camera.position).normalize();
         raycaster.set(camera.position, rayDir);
-        const intersects = raycaster.intersectObjects(voxels);
+        const intersects = raycaster.intersectObjects(voxels, true); // Enable recursive check for Groups
 
         if (intersects.length > 0) {
           const hit = intersects[0];
-          frameTargetVoxelPos = hit.object.position.clone();
+          // Since voxels are Groups, we need to get the position from the parent
+          frameTargetVoxelPos = hit.object.parent.position.clone();
         }
       }
     }
