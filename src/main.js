@@ -675,23 +675,33 @@ function addVoxel(pos) {
   const exists = voxels.some(v => v.position.distanceTo(pos) < 0.1);
   if (exists) return;
 
+  const group = new THREE.Group();
+
+  // Solid Mesh
   const geo = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    wireframe: true
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x40E0D0, // Turquoise
+    roughness: 0.3,
+    metalness: 0.1
   });
-  const voxel = new THREE.Mesh(geo, mat);
-  voxel.position.copy(pos);
-  scene.add(voxel);
-  voxels.push(voxel);
+  const mesh = new THREE.Mesh(geo, mat);
+  group.add(mesh);
+
+  // Wireframe (Edges)
+  const edges = new THREE.EdgesGeometry(geo);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+  const wireframe = new THREE.LineSegments(edges, lineMat);
+  group.add(wireframe);
+
+  group.position.copy(pos);
+  scene.add(group);
+  voxels.push(group);
 }
 
 init().then(() => {
-  // Update any existing voxels to pure white basic material
-  voxels.forEach(v => {
-    v.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      wireframe: true
-    });
-  });
+  // Simple cleanup: ensure any initial voxels are initialized correctly (though voxels array is likely empty at start)
+  const initialPositions = voxels.map(v => v.position.clone());
+  voxels.forEach(v => scene.remove(v));
+  voxels.length = 0;
+  initialPositions.forEach(pos => addVoxel(pos));
 });
